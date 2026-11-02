@@ -1,0 +1,400 @@
+# Corrected copy of Figures_2009.R. Changes from the original:
+#  - reads the corrected outputs for the chosen ensemble method (options(flucode.ensemble_method);
+#    default "mean_of_quantiles", the paper's method) instead of MeanBased-Ensemble
+#  - age-specific ENS (fig 2) comes from the age_interval files for the chosen method
+#  - averted hospitalisations and deaths are plotted in thousands (corrected counts are ~32.6x
+#    smaller than the originals, which were plotted in millions)
+#  - no Windows setwd(); output goes to Ensemble_Corrected/figures/<method>/
+#  - reshape/khroma are not loaded (not used)
+
+repo_root <- local({
+  d <- normalizePath(getwd())
+  while (!dir.exists(file.path(d, "model-forecasts"))) {
+    if (dirname(d) == d) stop("Run from inside the FluCode repository.")
+    d <- dirname(d)
+  }
+  d
+})
+setwd(file.path(repo_root, "comparison-scripts"))
+ensemble_method <- match.arg(getOption("flucode.ensemble_method", "mean_of_quantiles"),
+                             c("mean_of_quantiles", "linear_pool"))
+ens_dir <- c(mean_of_quantiles = "MeanOfQuantiles-Corrected", linear_pool = "LinearPool-Ensemble")[[ensemble_method]]
+fig_dir <- file.path(repo_root, "comparison-scripts", "Ensemble_Corrected", "figures", ensemble_method)
+dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+path <- file.path(repo_root, "model-forecasts/")
+
+library(ggplot2)
+library(viridis)
+library(ggsci)
+library(ggpubr)
+library(gridExtra)
+library(egg)
+library(scales)
+library(lubridate)
+library(data.table)
+library(magrittr)
+library(grid)
+library(doBy)
+library(wesanderson)
+library(plyr)
+library(tidyr)
+
+
+#Figure 2 - age-stratified ---------------------------------------
+
+s <- read.csv(file.path(path, ens_dir, "/2009_symillness_age_interval.csv")) 
+d <- read.csv(file.path(path, ens_dir, "/2009_death_age_interval.csv")) 
+
+s <- s %>% group_by("agegroup")
+s <- s[which(!(s$team %in% c("NEU", "NEU2"))),] %>%
+  mutate(team = ifelse(team == "NEU3", "NEU", as.character(team)))
+s$agegroup <- factor(x = s$agegroup, levels = c("Overall", "0-4 years", "5-17 years", "18-49 years", "50-64 years", "65+ years"))
+
+s <- s[order(s$team),]
+s <- s[3:7]
+
+s$team <- factor(x = s$team, levels = rev(c("COL", "COL2", "IMP", "NEU", "UTA", "UVA", "ENS")))
+
+s$cml <- s$cml * 100
+s$lower <- s$lower * 100
+s$upper <- s$upper * 100
+
+pal <- pal_nejm()
+p1 <- ggplot(s, aes(x = team, y = cml, color=team)) +
+  facet_wrap( ~ agegroup, scales = "free_y", nrow=1)+ 
+  expand_limits(y = 0)+
+  geom_point( position=position_dodge2(0.9)) +#size = 3.5,
+  geom_errorbar(aes(x = team, ymax = upper, ymin = lower),
+                position=position_dodge2(0.9))+ #, size=1
+  scale_color_manual(values = rev(c(rev(pal(6)), "black")))+
+  xlab("")+
+  ylab("Percent Symptomatic")+ theme(panel.grid.major.x = element_blank())+
+  # ggtitle("a. Age-specific symptomatic percentages in 2009 no intervention scenario")+
+  ggtitle("a.")+
+  theme(
+    axis.text.x = element_blank(),
+    # axis.text.y = element_text(size=13),
+    axis.ticks.x = element_blank())#,
+    # strip.text = element_text(size = 20))
+
+
+d <- d %>% group_by("agegroup")
+d <- d[which(!(d$team %in% c("NEU", "NEU2"))),] %>%
+  mutate(team = ifelse(team == "NEU3", "NEU", as.character(team)))
+d$agegroup <- factor(x = d$agegroup, levels = c("Overall", "0-4 years", "5-17 years", "18-49 years", "50-64 years", "65+ years"))
+
+d <- d[order(d$team),]
+d <- d[3:7]
+
+d$team <- factor(x = d$team, levels = rev(c("COL", "COL2", "IMP", "NEU", "UTA", "UVA", "ENS")))
+
+pal <- pal_nejm()
+p2 <- ggplot(d, aes(x = team, y = cml, color=team)) + 
+  facet_wrap( ~ agegroup, scales = "free_y", nrow=1)+ 
+  expand_limits(y = 0)+
+  geom_point( position=position_dodge2(0.9)) + #size = 3.5,
+  geom_errorbar(aes(x = team, ymax = upper, ymin = lower), #size=1,
+                position=position_dodge2(0.9))+
+  scale_color_manual(values = rev(c(rev(pal(6)), "black")))+
+  xlab("")+
+  ylab("Death Rate per 100,000")+ theme(panel.grid.major.x = element_blank())+
+  # ggtitle("b. Age-specific death rates per 100,000 in 2009 no intervention scenario")+
+  ggtitle("b.")+
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank())#,
+    # axis.text.y = element_text(size=13),
+    # strip.text = element_text(size = 20))
+
+
+png(file.path(fig_dir, "fig2_2009.png"),res=220, 1600, 1000)
+ggarrange(p1, p2, nrow=2, ncol=1)
+dev.off()
+
+
+#Figure 1 - unmitigated epi curve---------------------------------------
+
+path <- file.path(repo_root, "model-forecasts/")
+
+ens.levels <- c("ENS", "UVA", "UTA", "NEU", "IMP", "COL2", "COL")
+
+long_ens <- read.csv(paste0(path, ens_dir, "/2009_symillness_ensemble.csv")) %>%
+  mutate(team = ifelse(team == "NEU3", "NEU", as.character(team)))
+long_ens$Date <- as.Date(long_ens$Date)
+long_ens$team <- factor(long_ens$team, ens.levels)
+pal_black <- c("black",pal(6))
+
+png(file.path(fig_dir, "fig1_2009.png"),res=220, 1600, 1000)
+ggplot(data = long_ens, aes(x = Date, y = RL01_mean, group = team)) +
+  geom_line(aes(color = team), lwd = 1.5) +
+  geom_ribbon(aes(ymin = RL01_perc2p5, ymax = RL01_perc97p5, fill = team), 
+              alpha = 0.15,
+              show.legend = FALSE)+
+  ylab("% Incident Symptomatic Illness") +
+  scale_color_manual(values = pal_black)+
+  scale_fill_manual(values = pal_black)+
+  # ggtitle("2009, No Intervention: Symptomatic Illness Epidemic Curves")+
+  theme_light()+
+  scale_x_date(labels = date_format("%b"))
+
+dev.off()
+
+#Figure 3 - rank order figures---------------------------------------
+
+plot_data <- read.csv(paste0(path, ens_dir, "/2009_symillness_metrics.csv")) %>%
+  mutate(Team = ifelse(Team == "NEU3", "NEU", as.character(Team)))
+plot_data$Team <- factor(plot_data$Team, ens.levels)
+
+p6 <- plot_data %>% filter(Output == "Averted Number") %>% mutate(x = 1)%>% dplyr::rename(Averted = Reduction) %>%
+  ggplot(., aes( x = x, y = Averted, fill = Rank)) +
+  geom_col() +
+  facet_grid( Team ~  Scenario, switch = "y") +
+  coord_flip()+
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_hline(yintercept = 0, color = "black")+
+  theme_minimal() + 
+  labs(y = 'Illnesses averted (millions)', x = '', fill = 'Rank') +
+  theme(#axis.title = element_text(size=12), strip.text = element_text(size=10),
+        panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        axis.text.y = element_blank(), #element_text(size=10),
+        strip.text.y.left = element_text(angle = 360), #element_text(size=10),
+        axis.line.x = element_line(colour = "black"),
+        legend.position = 'bottom'
+        )+
+  scale_y_continuous(labels = scales::label_number(scale = 1 / 1e6))+
+  ggtitle("a.")
+
+
+p3 <- plot_data %>% filter(Output == "Averted Percent") %>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Rank)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_text(aes(y = Team, x = Scenario, label = paste0(round(Reduction, 0), "%"))) +
+  facet_grid(switch ="y")+# facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Rank') +
+  theme(#axis.title = element_text(size=12), strip.text = element_text(size=10), 
+        panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        legend.position = 'bottom' #axis.text.y = element_text(size=10), 
+        )+
+  ggtitle("b.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team)))
+
+
+p4 <- plot_data %>% filter(Output == "Magnitude Reduction") %>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Rank)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_text(aes(y = Team, x = Scenario, label = paste0(round(Reduction, 0), "%"))) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Rank') +
+  theme(#axis.title = element_text(size=12), 
+        #strip.text = element_text(size=10), 
+        panel.grid.minor.x = element_blank(), 
+        panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text(hjust = .5),
+        #axis.text.y = element_text(size=10), 
+        legend.position = 'bottom'
+        )+
+  ggtitle("a.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team)))
+
+
+p5 <- plot_data %>% filter(Output == "Peak Delay") %>% dplyr::rename(Delay = Reduction)%>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Delay)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(5,3,1)]) +
+  geom_text(aes(y = Team, x = Scenario, label = Delay)) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Delay, Weeks') +
+  theme(#axis.title = element_text(size=12), strip.text = element_text(size=10), 
+        panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        legend.position = 'bottom',
+        legend.key.width = unit(1.5, "cm")
+        )+
+  ggtitle("b.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team))[-7])
+
+
+png(file.path(fig_dir, "fig3_2009.png"),res=220, 1650, 1600)
+ggarrange(p6, p3, nrow=2, ncol=1)#,common.legend = TRUE, legend="bottom")
+dev.off()
+
+png(file.path(fig_dir, "fig3_cd_2009.png"),res=220, 1650, 1600)
+ggarrange(p4, p5, nrow=2, ncol=1)#,common.legend = TRUE, legend="bottom")
+dev.off()
+
+#Supp figure hospitalizations - rank order figures----------------------------
+
+plot_data <- read.csv(paste0(path, ens_dir, "/2009_hospitalization_metrics.csv")) %>%
+  mutate(Team = ifelse(Team == "NEU3", "NEU", as.character(Team)))
+plot_data$Team <- factor(plot_data$Team, ens.levels)
+
+scaleFUNh <- function(x) sprintf("%.0f", x / 1e3)
+
+h6 <- plot_data %>% filter(Output == "Averted Number") %>% mutate(x = 1)%>% dplyr::rename(Averted = Reduction) %>%
+  ggplot(., aes( x = x, y = Averted, fill = Rank)) +
+  geom_col() +
+  facet_grid( Team ~  Scenario, switch = "y") +
+  coord_flip()+
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  # geom_text(aes(label=paste(format(round(Averted / 1e6, 1), trim = TRUE))), 
+  #           size=3, hjust=1.0) +
+  geom_hline(yintercept = 0, color = "black")+
+  theme_minimal() + 
+  labs(y = 'Hospitalizations averted (thousands)', x = '', fill = 'Rank') +
+  theme(#axis.title = element_text(size=12), strip.text = element_text(size=10),
+        panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.x = element_text(hjust = .5),
+        axis.text.y = element_blank(), #element_text(size=10),
+        strip.text.y.left = element_text(angle = 360),
+        axis.line.x = element_line(colour = "black"),
+        legend.position = 'bottom'
+        )+
+  scale_y_continuous(labels = scaleFUNh, n.breaks = 3)+
+  ggtitle("a.")
+
+
+h3 <- plot_data %>% filter(Output == "Averted Percent") %>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Rank)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_text(aes(y = Team, x = Scenario, label = paste0(round(Reduction, 0), "%"))) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Rank') +
+  theme(#axis.title = element_text(size=12), strip.text = element_text(size=10), 
+        panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text(hjust = .5),
+        legend.position = 'bottom'
+        )+
+  ggtitle("b.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team)))
+
+h4 <- plot_data %>% filter(Output == "Magnitude Reduction") %>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Rank)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_text(aes(y = Team, x = Scenario, label = paste0(round(Reduction, 0), "%"))) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Rank') +
+  theme(panel.grid.minor.x = element_blank(), 
+        panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text(hjust = .5),
+        legend.position = 'bottom'
+        )+
+  ggtitle("c.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team)))
+
+h5 <- plot_data %>% filter(Output == "Peak Delay") %>% dplyr::rename(Delay = Reduction)%>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Delay)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(5,3,1)]) +
+  geom_text(aes(y = Team, x = Scenario, label = Delay)) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Delay, Weeks') +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        legend.position = 'bottom',
+        legend.key.width = unit(1.5, "cm")
+        )+
+  ggtitle("d.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team))[-7])
+
+
+png(file.path(fig_dir, "fig3h_2009.png"),width = 1650, height=3200, res = 220)
+ggarrange(h6, h3, h4, h5, nrow=4, ncol=1)#,common.legend = TRUE, legend="bottom")
+dev.off()
+
+#Supp figure deaths - rank order figures----------------------------
+
+plot_data <- read.csv(paste0(path, ens_dir, "/2009_death_metrics.csv")) %>%
+  mutate(Team = ifelse(Team == "NEU3", "NEU", as.character(Team)))
+plot_data$Team <- factor(plot_data$Team, ens.levels)
+
+scaleFUNd <- function(x) sprintf("%.1f", x / 1e3)
+
+d6 <- plot_data %>% filter(Output == "Averted Number") %>% mutate(x = 1)%>% dplyr::rename(Averted = Reduction) %>%
+  ggplot(., aes( x = x, y = Averted, fill = Rank)) +
+  geom_col() +
+  facet_grid( Team ~  Scenario, switch = "y") +
+  coord_flip()+
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  # geom_text(aes(label=paste(format(round(Averted / 1e6, 1), trim = TRUE))), 
+  #           size=3, hjust=1.0) +
+  geom_hline(yintercept = 0, color = "black")+
+  theme_minimal() + 
+  labs(y = 'Deaths averted (thousands)', x = '', fill = 'Rank') +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        axis.text.y = element_blank(), 
+        axis.line.x = element_line(colour = "black"),
+        strip.text.y.left = element_text(angle = 360),
+        legend.position = 'bottom'
+        )+
+  scale_y_continuous(labels = scaleFUNd, n.breaks = 3)+
+  ggtitle("a.")
+
+
+d3 <- plot_data %>% filter(Output == "Averted Percent") %>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Rank)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_text(aes(y = Team, x = Scenario, label = paste0(round(Reduction, 0), "%"))) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Rank') +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text(hjust = .5),
+        legend.position = 'bottom'
+        )+
+  ggtitle("b.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team)))
+
+
+d4 <- plot_data %>% filter(Output == "Magnitude Reduction") %>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Rank)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(1,3,5)],
+                       guide = "legend") +
+  geom_text(aes(y = Team, x = Scenario, label = paste0(round(Reduction, 0), "%"))) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Rank') +
+  theme(panel.grid.minor.x = element_blank(), 
+        panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        legend.position = 'bottom'
+        )+
+  ggtitle("c.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team)))
+
+d5 <- plot_data %>% filter(Output == "Peak Delay") %>% dplyr::rename(Delay = Reduction)%>% ggplot(.) +
+  geom_raster(aes(y = Team, x = Scenario, fill = Delay)) +
+  scale_fill_gradientn(colors = wes_palette("Zissou1", 5)[c(5,3,1)]) +
+  geom_text(aes(y = Team, x = Scenario, label = Delay)) +
+  # facet_wrap(Scenario.type~measure, ncol = 2, scales = 'free_x') +
+  theme_minimal() + 
+  labs(y = 'Model', x = 'Scenario', fill = 'Delay, Weeks') +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.minor.y = element_blank(),
+        axis.text.x = element_text( hjust = .5),
+        legend.position = 'bottom',
+        legend.key.width = unit(1.5, "cm"))+
+  ggtitle("d.")+ 
+  scale_y_discrete(limits = rev(levels(plot_data$Team))[-7])
+
+
+png(file.path(fig_dir, "fig3d_2009.png"),width = 1650, height=3200, res=220)
+ggarrange(d6, d3, d4, d5, nrow=4, ncol=1)#,common.legend = TRUE, legend="bottom")
+dev.off()
+
